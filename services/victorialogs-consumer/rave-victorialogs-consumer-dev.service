@@ -1,0 +1,32 @@
+# Dev, on-demand user unit for the Iggy -> VictoriaLogs consumer.
+#
+# Manual start only (no [Install] section => never auto-starts). Started by hand
+# while you're logged in, so no linger is needed. Install:
+#
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf ~/Development/fr-the-rave/services/victorialogs-consumer/rave-victorialogs-consumer-dev.service \
+#          ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#
+#   # config lives at ~/.config/rave/victorialogs-consumer-dev.toml (mode 600; holds the Iggy password)
+#
+#   systemctl --user start  rave-victorialogs-consumer-dev.service
+#   systemctl --user status rave-victorialogs-consumer-dev.service
+#   journalctl --user -u rave-victorialogs-consumer-dev.service -f
+#   systemctl --user stop   rave-victorialogs-consumer-dev.service
+
+[Unit]
+Description=Rave Iggy -> VictoriaLogs consumer (dev, manual start)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=%h/Development/fr-the-rave/target/debug/victorialogs-consumer %h/.config/rave/victorialogs-consumer-dev.toml
+# Dev: do not auto-restart; we start/stop it by hand.
+Restart=no
+# Creates ~/.local/state/rave-victorialogs-consumer-dev for the offsets file.
+StateDirectory=rave-victorialogs-consumer-dev
+Environment=RUST_LOG=info
+
+# No [Install] section on purpose: this unit is started manually only.
