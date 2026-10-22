@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+**/target
+
+# Backtraces
+*.rs.bk
+
+# jujutsu colocated working copy (git should never track this)
+/.jj/
+
+# Editor / OS cruft
+*.swp
+*~
+.DS_Store

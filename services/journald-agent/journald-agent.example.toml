@@ -1,0 +1,29 @@
+# journald-agent configuration.
+# Pass the path as argv[1], or install at /etc/rave/journald-agent.toml.
+
+[iggy]
+# iggy://<user>:<password>@<host>:<tcp-port>
+connection_string = "iggy://logger:secret@10.20.0.10:8090"
+stream = "logs"
+topic  = "journal"
+
+[journal]
+# "tail" = start from now on first run (default); "head" = backfill everything.
+start_at = "tail"
+# Skip the agent's own unit so it doesn't ship (and amplify) its own logs.
+# Matched against both _SYSTEMD_UNIT (system units) and _SYSTEMD_USER_UNIT
+# (user units), so the plain service name works in either deployment style.
+exclude_units = ["rave-journald-agent-dev.service"]
+
+[batch]
+max_entries = 500
+linger_ms   = 1000
+
+[state]
+path = "/var/lib/rave-journald-agent/cursor"
+
+[backoff]
+initial_ms = 500
+max_ms     = 30000
+multiplier = 2.0
+jitter     = true

@@ -1,0 +1,41 @@
+# Dev, on-demand user unit for the journald -> Iggy log shipper.
+#
+# Manual start only (no [Install] section => never auto-starts, cannot be
+# `enable`d the usual way). Started by hand while you're logged in, so no
+# linger is needed. Run it when you want to test:
+#
+#   # install the unit
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf ~/Development/fr-the-rave/services/journald-agent/rave-journald-agent-dev.service \
+#          ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#
+#   # create a config (copy journald-agent.example.toml, set your password +
+#   # state.path = %h/.local/state/rave-journald-agent-dev/cursor)
+#   mkdir -p ~/.config/rave
+#   cp journald-agent.example.toml ~/.config/rave/journald-agent-dev.toml
+#
+#   # run on demand / stop / follow logs
+#   systemctl --user start  rave-journald-agent-dev.service
+#   systemctl --user status rave-journald-agent-dev.service
+#   journalctl --user -u rave-journald-agent-dev.service -f
+#   systemctl --user stop   rave-journald-agent-dev.service
+#
+# Reading the full system journal requires the user to be in the
+# `systemd-journal` (or wheel/adm) group.
+
+[Unit]
+Description=Rave journald -> Iggy log shipper (dev, manual start)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=%h/Development/fr-the-rave/target/debug/journald-agent %h/.config/rave/journald-agent-dev.toml
+# Dev: do not auto-restart; we start/stop it by hand.
+Restart=no
+# Creates ~/.local/state/rave-journald-agent-dev for the cursor file.
+StateDirectory=rave-journald-agent-dev
+Environment=RUST_LOG=info
+
+# No [Install] section on purpose: this unit is started manually only.
