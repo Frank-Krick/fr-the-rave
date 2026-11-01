@@ -1,19 +1,22 @@
 # journald-agent configuration.
+# Reads the systemd journal and ships entries straight to VictoriaLogs.
 # Pass the path as argv[1], or install at /etc/rave/journald-agent.toml.
-
-[iggy]
-# iggy://<user>:<password>@<host>:<tcp-port>
-connection_string = "iggy://logger:secret@10.20.0.10:8090"
-stream = "logs"
-topic  = "journal"
 
 [journal]
 # "tail" = start from now on first run (default); "head" = backfill everything.
 start_at = "tail"
 # Skip the agent's own unit so it doesn't ship (and amplify) its own logs.
-# Matched against both _SYSTEMD_UNIT (system units) and _SYSTEMD_USER_UNIT
-# (user units), so the plain service name works in either deployment style.
+# Matched against both _SYSTEMD_UNIT (system units) and _SYSTEMD_USER_UNIT (user units).
 exclude_units = ["rave-journald-agent-dev.service"]
+
+[victorialogs]
+url        = "http://10.20.0.11:9428"
+account_id = 1            # VictoriaLogs tenant: dev=1, prod=2
+project_id = 0
+msg_field     = "MESSAGE"                      # -> _msg
+time_field    = "_SOURCE_REALTIME_TIMESTAMP"   # -> _time (us unix; absent => ingest time)
+stream_fields = ["_HOSTNAME", "_SYSTEMD_UNIT", "_SYSTEMD_USER_UNIT"]
+ignore_fields = []                             # (a `level` field is added from PRIORITY)
 
 [batch]
 max_entries = 500

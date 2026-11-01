@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub iggy: IggyConfig,
+    pub victorialogs: VictoriaLogsConfig,
     #[serde(default)]
     pub journal: JournalConfig,
     #[serde(default)]
@@ -29,11 +29,35 @@ impl Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct IggyConfig {
-    /// e.g. "iggy://user:pass@10.20.0.10:8090"
-    pub connection_string: String,
-    pub stream: String,
-    pub topic: String,
+#[serde(default)]
+pub struct VictoriaLogsConfig {
+    /// Base URL, e.g. "http://10.20.0.11:9428".
+    pub url: String,
+    /// Tenant selector (default 0/0). Dev=1, prod=2 by project convention.
+    pub account_id: u32,
+    pub project_id: u32,
+    pub msg_field: String,
+    pub time_field: String,
+    pub stream_fields: Vec<String>,
+    pub ignore_fields: Vec<String>,
+}
+
+impl Default for VictoriaLogsConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            account_id: 0,
+            project_id: 0,
+            msg_field: "MESSAGE".to_string(),
+            time_field: "_SOURCE_REALTIME_TIMESTAMP".to_string(),
+            stream_fields: vec![
+                "_HOSTNAME".to_string(),
+                "_SYSTEMD_UNIT".to_string(),
+                "_SYSTEMD_USER_UNIT".to_string(),
+            ],
+            ignore_fields: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -81,7 +105,7 @@ impl BatchConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct StateConfig {
-    /// File holding the last Iggy-acked journal cursor.
+    /// File holding the last VictoriaLogs-acked journal cursor.
     pub path: PathBuf,
 }
 

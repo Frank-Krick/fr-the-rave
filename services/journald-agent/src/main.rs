@@ -1,13 +1,14 @@
-//! journald-agent: ship systemd journal entries to an Apache Iggy topic.
+//! journald-agent: ship systemd journal entries straight to VictoriaLogs.
 //!
-//! Correctness invariant: a journal cursor is only persisted *after* Iggy has
-//! acked the batch containing that entry. On restart we resume from the last
-//! persisted cursor, giving at-least-once delivery (a crash between ack and
+//! Correctness invariant: a journal cursor is only persisted *after* VictoriaLogs
+//! has 2xx-acked the batch containing that entry. On restart we resume from the
+//! last persisted cursor, giving at-least-once delivery (a crash between ack and
 //! persist replays the last batch).
 
+mod backoff;
 mod config;
 mod journal;
-mod shipper;
+mod sink;
 mod state;
 
 use std::path::PathBuf;
@@ -16,9 +17,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, watch};
 
-use config::{Config, StartAt};
+use config::{BackoffConfig, BatchConfig, Config, StartAt};
 use journal::{Entry, JournalReader};
-use shipper::Shipper;
+use sink::{build_ndjson, Sink};
 use state::CursorStore;
 
 const DEFAULT_CONFIG: &str = "/etc/rave/journald-agent.toml";
@@ -45,6 +46,7 @@ async fn main() -> Result<()> {
     tracing::info!(
         resuming = stored_cursor.is_some(),
         start_at = ?cfg.journal.start_at,
+        account_id = cfg.victorialogs.account_id,
         "journald-agent starting"
     );
 
@@ -69,17 +71,10 @@ async fn main() -> Result<()> {
         let _ = shutdown_tx.send(true);
     });
 
-    let shipper = Shipper::connect(
-        &cfg.iggy,
-        store,
-        cfg.batch.clone(),
-        cfg.backoff.clone(),
-    )
-    .await?;
+    let sink = Sink::new(&cfg.victorialogs)?;
+    run(&sink, &store, &cfg.batch, &cfg.backoff, rx, shutdown_rx).await?;
 
-    shipper.run(rx, shutdown_rx).await?;
-
-    // Shipper has stopped; the reader will observe shutdown (or the closed
+    // The sink loop has stopped; the reader will observe shutdown (or the closed
     // channel) and exit. Join it so we don't leak the thread.
     if let Err(e) = reader_handle.join() {
         tracing::error!(?e, "journal reader thread panicked");
@@ -88,11 +83,94 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Blocking loop: read journal entries and hand them to the shipper.
+/// Batch journal entries and POST each batch to VictoriaLogs, advancing the
+/// durable cursor only after a 2xx.
+async fn run(
+    sink: &Sink,
+    store: &CursorStore,
+    batch_cfg: &BatchConfig,
+    backoff_cfg: &BackoffConfig,
+    mut rx: mpsc::Receiver<Entry>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    loop {
+        // Block for the first entry of the next batch (or shutdown).
+        let first = tokio::select! {
+            biased;
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() { break; } else { continue; }
+            }
+            v = rx.recv() => v,
+        };
+        let Some(first) = first else { break }; // reader gone
+
+        let mut batch = vec![first];
+        let linger = tokio::time::sleep(batch_cfg.linger());
+        tokio::pin!(linger);
+        while batch.len() < batch_cfg.max_entries {
+            tokio::select! {
+                _ = &mut linger => break,
+                v = rx.recv() => match v {
+                    Some(e) => batch.push(e),
+                    None => break,
+                },
+            }
+        }
+
+        let last_cursor = batch.last().expect("non-empty batch").cursor.clone();
+        let payloads: Vec<Vec<u8>> = batch
+            .iter()
+            .map(|e| serde_json::to_vec(&e.payload).expect("journal payload is valid json"))
+            .collect();
+        let body = build_ndjson(&payloads);
+
+        if post_with_retry(sink, &body, backoff_cfg, &mut shutdown).await.is_err() {
+            break; // shutdown during retry; cursor NOT advanced, batch replays next start
+        }
+
+        store.store(&last_cursor).context("persisting acked cursor")?;
+        tracing::debug!(count = batch.len(), cursor = %last_cursor, "ingested batch");
+    }
+    Ok(())
+}
+
+/// POST to VictoriaLogs, retrying with exponential backoff until a 2xx. Returns
+/// `Err(())` only if shutdown is requested mid-retry.
+async fn post_with_retry(
+    sink: &Sink,
+    body: &[u8],
+    cfg: &BackoffConfig,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<(), ()> {
+    let mut delay_ms = cfg.initial_ms;
+    loop {
+        match sink.post(body.to_vec()).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let sleep_ms = backoff::jittered(delay_ms, cfg.jitter);
+                tracing::warn!(error = %e, retry_in_ms = sleep_ms, "victorialogs post failed; backing off");
+                if sleep_or_shutdown(sleep_ms, shutdown).await {
+                    return Err(());
+                }
+                delay_ms = backoff::next_delay(delay_ms, cfg);
+            }
+        }
+    }
+}
+
+/// Sleep for `ms`, returning `true` if shutdown was signalled instead.
+async fn sleep_or_shutdown(ms: u64, shutdown: &mut watch::Receiver<bool>) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_millis(ms)) => false,
+        _ = shutdown.changed() => *shutdown.borrow(),
+    }
+}
+
+/// Blocking loop: read journal entries and hand them to the sink loop.
 ///
-/// Backpressure is intentional: when Iggy is down the shipper stops draining
-/// the channel, `blocking_send` blocks, and the journal's own on-disk storage
-/// becomes the buffer until Iggy recovers.
+/// Backpressure is intentional: when VictoriaLogs is down the sink loop stops
+/// draining the channel, `blocking_send` blocks, and the journal's own on-disk
+/// storage becomes the buffer until VictoriaLogs recovers.
 fn reader_loop(
     start_at: StartAt,
     stored_cursor: Option<String>,
@@ -105,7 +183,7 @@ fn reader_loop(
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(error = %e, "failed to open journal; shutting down");
-                return; // dropping tx closes the channel and stops the shipper
+                return; // dropping tx closes the channel and stops the sink loop
             }
         };
 
@@ -119,7 +197,7 @@ fn reader_loop(
                     continue;
                 }
                 if tx.blocking_send(entry).is_err() {
-                    break; // shipper gone
+                    break; // sink loop gone
                 }
             }
             Ok(None) => {} // idle timeout; loop to re-check shutdown

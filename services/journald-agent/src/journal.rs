@@ -107,11 +107,19 @@ impl JournalReader {
             .iter()
             .filter_map(|k| record.get(*k).cloned())
             .collect();
+        // Derive a `level` field from journald PRIORITY so VictoriaLogs shows a real
+        // log level instead of "OTHER".
+        let level = record
+            .get("PRIORITY")
+            .map(String::as_str)
+            .and_then(crate::sink::priority_to_level);
         let mut map = serde_json::Map::with_capacity(record.len() + 1);
         for (k, v) in record {
             map.insert(k, serde_json::Value::String(v));
         }
-        map.insert("__cursor".to_string(), serde_json::Value::String(cursor.clone()));
+        if let Some(level) = level {
+            map.insert("level".to_string(), serde_json::Value::String(level.to_string()));
+        }
         Entry { cursor, payload: serde_json::Value::Object(map), units }
     }
 }

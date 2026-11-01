@@ -70,7 +70,7 @@ impl Sink {
 
 /// Map a syslog PRIORITY (journald `PRIORITY`, "0".."7") to a VictoriaLogs-recognized
 /// level name. Returns `None` for unmappable values.
-fn priority_to_level(priority: &str) -> Option<&'static str> {
+pub fn priority_to_level(priority: &str) -> Option<&'static str> {
     match priority.trim() {
         "0" => Some("emerg"),
         "1" => Some("alert"),
@@ -81,28 +81,6 @@ fn priority_to_level(priority: &str) -> Option<&'static str> {
         "6" => Some("info"),
         "7" => Some("debug"),
         _ => None,
-    }
-}
-
-/// Add a `level` field derived from journald `PRIORITY` so VictoriaLogs shows a real
-/// log level instead of "OTHER". Returns the payload unchanged when it isn't a JSON
-/// object or has no mappable `PRIORITY` (VL then just treats it as level-less).
-pub fn enrich_level(payload: &[u8]) -> Vec<u8> {
-    let Ok(serde_json::Value::Object(mut map)) =
-        serde_json::from_slice::<serde_json::Value>(payload)
-    else {
-        return payload.to_vec();
-    };
-    let level = map
-        .get("PRIORITY")
-        .and_then(|v| v.as_str())
-        .and_then(priority_to_level);
-    match level {
-        Some(level) => {
-            map.insert("level".to_string(), serde_json::Value::String(level.to_string()));
-            serde_json::to_vec(&serde_json::Value::Object(map)).unwrap_or_else(|_| payload.to_vec())
-        }
-        None => payload.to_vec(),
     }
 }
 
@@ -131,26 +109,6 @@ mod tests {
     #[test]
     fn ndjson_empty() {
         assert!(build_ndjson(&[]).is_empty());
-    }
-
-    #[test]
-    fn enrich_maps_priority_to_level() {
-        let out = enrich_level(br#"{"MESSAGE":"hi","PRIORITY":"3"}"#);
-        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(v["level"], "error");
-        assert_eq!(v["MESSAGE"], "hi"); // original fields preserved
-    }
-
-    #[test]
-    fn enrich_passthrough_without_priority() {
-        let input = br#"{"MESSAGE":"hi"}"#;
-        assert_eq!(enrich_level(input), input.to_vec());
-    }
-
-    #[test]
-    fn enrich_passthrough_on_bad_priority_or_non_object() {
-        assert_eq!(enrich_level(br#"{"PRIORITY":"9"}"#), br#"{"PRIORITY":"9"}"#.to_vec());
-        assert_eq!(enrich_level(b"not json"), b"not json".to_vec());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# Dev, on-demand user unit for the journald -> Iggy log shipper.
+# Dev, on-demand user unit for the journald -> VictoriaLogs log shipper.
 #
 # Manual start only (no [Install] section => never auto-starts, cannot be
 # `enable`d the usual way). Started by hand while you're logged in, so no
@@ -10,8 +10,8 @@
 #          ~/.config/systemd/user/
 #   systemctl --user daemon-reload
 #
-#   # create a config (copy journald-agent.example.toml, set your password +
-#   # state.path = %h/.local/state/rave-journald-agent-dev/cursor)
+#   # create a config (copy journald-agent.example.toml, set the VictoriaLogs url
+#   # + state.path = %h/.local/state/rave-journald-agent-dev/cursor). No secrets.
 #   mkdir -p ~/.config/rave
 #   cp journald-agent.example.toml ~/.config/rave/journald-agent-dev.toml
 #
@@ -25,7 +25,7 @@
 # `systemd-journal` (or wheel/adm) group.
 
 [Unit]
-Description=Rave journald -> Iggy log shipper (dev, manual start)
+Description=Rave journald -> VictoriaLogs log shipper (dev, manual start)
 After=network-online.target
 Wants=network-online.target
 
