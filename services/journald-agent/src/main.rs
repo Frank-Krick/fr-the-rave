@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CONFIG));
     let cfg = Config::load(&config_path)?;
 
-    let store = CursorStore::new(cfg.state.path.clone());
+    let store = CursorStore::new(resolve_cursor_path(&cfg)?);
     let stored_cursor = store.load().context("loading stored cursor")?;
     tracing::info!(
         resuming = stored_cursor.is_some(),
@@ -81,6 +81,24 @@ async fn main() -> Result<()> {
     }
     tracing::info!("journald-agent stopped");
     Ok(())
+}
+
+/// Resolve the cursor file path: an explicit `[state].path` wins; otherwise
+/// derive it from systemd's `$STATE_DIRECTORY` (set by `StateDirectory=`), so a
+/// committed config stays portable across machines without a hardcoded home.
+fn resolve_cursor_path(cfg: &Config) -> Result<PathBuf> {
+    if let Some(state) = &cfg.state {
+        return Ok(state.path.clone());
+    }
+    let dir = std::env::var_os("STATE_DIRECTORY").context(
+        "no [state].path in config and $STATE_DIRECTORY is unset \
+         (run under systemd with StateDirectory=, or set [state].path)",
+    )?;
+    // STATE_DIRECTORY may be a colon-separated list; use the first entry.
+    let first = std::env::split_paths(&dir)
+        .next()
+        .context("$STATE_DIRECTORY is empty")?;
+    Ok(first.join("cursor"))
 }
 
 /// Batch journal entries and POST each batch to VictoriaLogs, advancing the

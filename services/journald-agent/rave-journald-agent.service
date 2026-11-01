@@ -1,0 +1,36 @@
+# PROD user unit for the journald -> VictoriaLogs log shipper.
+#
+# Committed in the repo so every prod host picks it up identically. It runs the
+# RELEASE binary and the committed prod config (journald-agent.toml, tenant 0/0).
+# Both paths assume the repo is checked out at ~/Development/fr-the-rave.
+#
+# Deploy on a prod host:
+#   cd ~/Development/fr-the-rave && cargo build --release
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf ~/Development/fr-the-rave/services/journald-agent/rave-journald-agent.service \
+#          ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now rave-journald-agent.service
+#
+#   # to run without an active login session (start at boot):
+#   loginctl enable-linger "$USER"
+#
+# Reading the full system journal requires the user to be in the
+# `systemd-journal` (or wheel/adm) group.
+
+[Unit]
+Description=Rave journald -> VictoriaLogs log shipper (prod)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+ExecStart=%h/Development/fr-the-rave/target/release/journald-agent %h/Development/fr-the-rave/services/journald-agent/journald-agent.toml
+Restart=always
+RestartSec=5
+# Provides $STATE_DIRECTORY=~/.local/state/rave-journald-agent for the cursor file.
+StateDirectory=rave-journald-agent
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target

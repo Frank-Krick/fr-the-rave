@@ -13,7 +13,11 @@ pub struct Config {
     pub journal: JournalConfig,
     #[serde(default)]
     pub batch: BatchConfig,
-    pub state: StateConfig,
+    /// Optional: if omitted, the cursor path is derived from systemd's
+    /// `$STATE_DIRECTORY` (set by `StateDirectory=` in the unit), which keeps a
+    /// committed config portable across machines/users.
+    #[serde(default)]
+    pub state: Option<StateConfig>,
     #[serde(default)]
     pub backoff: BackoffConfig,
 }

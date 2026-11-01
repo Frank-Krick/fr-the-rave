@@ -1,0 +1,31 @@
+# journald-agent — PROD config (committed; shared across machines).
+# Ships the local systemd journal straight to VictoriaLogs. No secrets
+# (VictoriaLogs is unauthenticated), and no machine-specific paths, so this file
+# is picked up verbatim on every prod host via the committed unit.
+#
+# Cursor state path is intentionally NOT set here — it comes from systemd's
+# $STATE_DIRECTORY (StateDirectory=rave-journald-agent in the unit), i.e.
+# ~/.local/state/rave-journald-agent/cursor, which works for any user/host.
+
+[journal]
+start_at = "tail"
+exclude_units = ["rave-journald-agent.service"]
+
+[victorialogs]
+url        = "http://10.20.0.11:9428"
+account_id = 0            # prod tenant (default 0/0)
+project_id = 0
+msg_field     = "MESSAGE"
+time_field    = "_SOURCE_REALTIME_TIMESTAMP"
+stream_fields = ["_HOSTNAME", "_SYSTEMD_UNIT", "_SYSTEMD_USER_UNIT"]
+ignore_fields = []
+
+[batch]
+max_entries = 500
+linger_ms   = 1000
+
+[backoff]
+initial_ms = 500
+max_ms     = 30000
+multiplier = 2.0
+jitter     = true
